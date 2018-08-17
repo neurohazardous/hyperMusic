@@ -15,8 +15,18 @@ To characterize a mapping of the neural substrates of social interaction using a
 * Includes a .mat file that pairs electrode numbers to electrode names (the gTec system records the electrode names as numbers)
 * Includes the preprocessing function, hM_preProEEGLAB
 
-### Figures
-* Includes some preliminary results (neural substrate mapping, movement data...)
+### _figs
+* Done with Python's seaborn. This folder includes...
+    1. Preliminary results of pre and post self reports of how much people like each other (people seem to like each other a bit more after playing music with each other)
+    2. High pass filter (frequency and phase response) used for preprocessing steps
+    3. Data before preprocessing
+    4. Data before preprocessing
+    5. Data after preprocessing
+    6. Hyperbrain networks from 10 polyphonic trials: with current analysis parameters we see no network between people, only within connections
+    7. Hyperbrain networks from 10 homophonic trials: with current analysis parameters we see no network between people, only within connections
+    8. Symbolic transfer entropy and self reports at the trial level plotted against each other (Synergy, or how much people thought they were playing with each other)
+    9. Symbolic transfer entropy and self reports at the trial level plotted against each other (Syncrhonization, or how people thought they were syncronized during that trial)
+    10. 8. Symbolic transfer entropy and self reports at the trial level plotted against each other (Quality, or how good people thought that specific trial was)
 
 ### 1-self_reports
 * Takes in a CSV report data (from the MAQ) questionnaire and compares pre and post scores of how much they like each other
