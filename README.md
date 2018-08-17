@@ -14,7 +14,6 @@ To characterize a mapping of the neural substrates of social interaction using a
 ### _dependencies
 * Includes a .mat file that pairs electrode numbers to electrode names (the gTec system records the electrode names as numbers)
 * Includes the preprocessing function, hM_preProEEGLAB
-* Includes the version of [EEGLAB](https://sccn.ucsd.edu/eeglab/index.php) that I will use for the preprocessing of the data
 
 ### Figures
 * Includes some preliminary results (neural substrate mapping, movement data...)
@@ -54,7 +53,7 @@ To characterize a mapping of the neural substrates of social interaction using a
     
 ### 2-preprocessing_input2decomposition.m
 * Ended up deciding to go for MATLAB for the pre-processing
-* Uses function called hM_preProEEGLAB.m found in dependencies
+* Uses function called hM_preProEEGLAB.m found in dependencies, based on EEGLAB
     1. Load file and delete extra events
     2. High pass filter 1 Hz (Hamming windowed sinc FIR)
     3. Load channel locations, delete extra channels, and assign 10 20 name
