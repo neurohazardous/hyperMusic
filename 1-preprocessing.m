@@ -58,7 +58,7 @@ addpath('dependencies/eeglab14_1_2b/');
 [ALLEEG EEG CURRENTSET ALLCOM] = eeglab; % start EEGLAB under Matlab
 close all
 addpath('dependencies/fieldtrip-21092018/')
-ft_defaults 
+ft_defaults
 global ft_default
 ft_default.spmversion='spm12';
 
@@ -210,6 +210,69 @@ plot3(fid_pos(:,1), fid_pos(:,2), fid_pos(:,3), style);
 % plot labels
 for j=1:size(fid_pos,1)
     text(fid_pos(j,1), fid_pos(j,2), fid_pos(j,3), fid_names{j});
+end
+
+for n_sub=5:6 %length(subjects)
+    %% == 9) Electrode allignment with template ==============================
+    % It is easier if you run all the participants at once!
+    % Properties
+    chan_locs = ['data/raw/' pairs{n_sub} '/eeg/hM_EEGDIGI_' subjects{n_sub} '.sfp'];
+    elec = ft_read_sens(chan_locs, 'senstype', 'eeg');
+    elec = ft_convert_units(elec, 'mm');
+    
+    nas=mri.hdr.fiducial.mri.nas;
+    lpa=mri.hdr.fiducial.mri.lpa;
+    rpa=mri.hdr.fiducial.mri.rpa;
+    
+    transm=mri.transform;
+    
+    nas=ft_warp_apply(transm,nas, 'homogenous');
+    lpa=ft_warp_apply(transm,lpa, 'homogenous');
+    rpa=ft_warp_apply(transm,rpa, 'homogenous');
+    
+    % plot pre allignment
+    figure;
+    % head surface (scalp)
+    ft_plot_mesh(headmodel.bnd(1), 'edgecolor','none','facealpha',0.8,'facecolor',[0.6 0.6 0.8]);
+    hold on;
+    % electrodes
+    ft_plot_sens(elec, 'marker', 'o', 'color', 'black');
+    
+    % create a structure similar to a template set of electrodes to allign
+    % MRI with fiducials (first pass)
+    fid = [];
+    fid.elecpos       = [nas; lpa; rpa];       % ctf-coordinates of fiducials
+    fid.label         = {'NZ','LPA','RPA'};    % same labels as in elec
+    fid.unit          = 'mm';                  % same units as mri
+    
+    % First alignment: fiducials
+    cfg               = [];
+    cfg.method        = 'fiducial';
+    cfg.target        = fid;                   % see above
+    cfg.elec          = elec;
+    cfg.fiducial      = {'Nz', 'LPA', 'RPA'};  % labels of fiducials in fid and in elec
+    elec_aligned      = ft_electroderealign(cfg);
+    
+    % plot post allignment
+    figure;
+    ft_plot_sens(elec_aligned,'marker', 's', 'color', 'black');
+    hold on;
+    ft_plot_mesh(headmodel.bnd(1),'facealpha', 0.85, 'edgecolor', 'none', 'facecolor', [0.65 0.65 0.65]); %scalp
+    
+    % we do a second interactive pass just in case!
+    cfg           = [];
+    cfg.method    = 'interactive';
+    cfg.elec      = elec_aligned;
+    cfg.headshape = headmodel.bnd(1);
+    elec_aligned  = ft_electroderealign(cfg);
+    save(['output/elec_aligned/' pairs{n_sub} '/' subjects{n_sub} '_elec_aligned.mat'],'elec_aligned');
+    %{
+    1. Set alpha level to 0.9
+    2. Goal is to have as many electrodes as possible on the scalp
+    3. Take screenshot with transpose values and save it in the eeg_sources
+    folder
+    %}
+    close all
 end
 
 %% == 1) Load data and setup parameters ==================================
@@ -382,7 +445,7 @@ for n_sub=5:6 %length(subjects)
         end
     end
     bad_channels = bad_channels(~cellfun('isempty',bad_channels));
-
+    
     % Write text file with session bad channels
     fid = fopen( 'output/bad_channels.txt', 'a' );
     fprintf(fid, [filename, ',']);
@@ -400,695 +463,401 @@ for n_sub=5:6 %length(subjects)
     mega_bad_channels{n_mega} = bad_channels;
     mega_eeg{n_mega} = EEG;
     mega_condition{n_mega} = filename(4:14);
-end 
     
-for n_sub=5:6 %length(subjects)
-    %% == 9) Electrode allignment with template ==============================
-    % It is easier if you run all the participants at once! 
-    % Properties
-    chan_locs = ['data/raw/' pairs{n_sub} '/eeg/hM_EEGDIGI_' subjects{n_sub} '.sfp'];
-    elec = ft_read_sens(chan_locs, 'senstype', 'eeg');
-    elec = ft_convert_units(elec, 'mm');
-
-    nas=mri.hdr.fiducial.mri.nas;
-    lpa=mri.hdr.fiducial.mri.lpa;
-    rpa=mri.hdr.fiducial.mri.rpa;
-
-    transm=mri.transform;
-
-    nas=ft_warp_apply(transm,nas, 'homogenous');
-    lpa=ft_warp_apply(transm,lpa, 'homogenous');
-    rpa=ft_warp_apply(transm,rpa, 'homogenous');
-
-    % plot pre allignment
-    figure;
-    % head surface (scalp)
-    ft_plot_mesh(headmodel.bnd(1), 'edgecolor','none','facealpha',0.8,'facecolor',[0.6 0.6 0.8]);
-    hold on;
-    % electrodes
-    ft_plot_sens(elec, 'marker', 'o', 'color', 'black');
-
-    % create a structure similar to a template set of electrodes to allign
-    % MRI with fiducials (first pass)
-    fid = [];
-    fid.elecpos       = [nas; lpa; rpa];       % ctf-coordinates of fiducials
-    fid.label         = {'NZ','LPA','RPA'};    % same labels as in elec
-    fid.unit          = 'mm';                  % same units as mri
-
-    % First alignment: fiducials
-    cfg               = [];
-    cfg.method        = 'fiducial';
-    cfg.target        = fid;                   % see above
-    cfg.elec          = elec;
-    cfg.fiducial      = {'Nz', 'LPA', 'RPA'};  % labels of fiducials in fid and in elec
-    elec_aligned      = ft_electroderealign(cfg);
-
-    % plot post allignment
-    figure;
-    ft_plot_sens(elec_aligned,'marker', 's', 'color', 'black');
-    hold on;
-    ft_plot_mesh(headmodel.bnd(1),'facealpha', 0.85, 'edgecolor', 'none', 'facecolor', [0.65 0.65 0.65]); %scalp
-
-    % we do a second interactive pass just in case!
-    cfg           = [];
-    cfg.method    = 'interactive';
-    cfg.elec      = elec_aligned;
-    cfg.headshape = headmodel.bnd(1);
-    elec_aligned  = ft_electroderealign(cfg);
-    save(['output/elec_aligned/' pairs{n_sub} '/' subjects{n_sub} '_elec_aligned.mat'],'elec_aligned');
-    %{
-    1. Set alpha level to 0.9
-    2. Goal is to hav as many electrodes as possible on the scalp
-    3. Take screenshot with transpose values and save it in the eeg_sources
-    folder
-    %}
-    close all
-end
-
-
-%% In case things go wrong...
-mega_eeg = {};
-mega_bad_channels = {};
-mega_conditions = {};
-n_mega = 1;
-for n_condition=1:length(conditions)
-    for n_trial=1:5
-        
-        % Create the MEGA EEG structure
-        filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
-        names = dir([filepath 'hM_' subjects{n_sub} '_' conditions{n_condition} '*.set']);
-        names = {names.name};
-        for n_filename = 1:length(names)
-            if names{n_filename}(16) == num2str(n_trial)
-                filename = names{n_filename};
-                break
+    
+    
+    %% == 11) Prepare EEG file ==============================
+    mega_eeg = {};
+    mega_bad_channels = {};
+    mega_conditions = {};
+    n_mega = 1;
+    for n_condition=1:length(conditions)
+        for n_trial=1:5
+            % Create the MEGA EEG structure
+            filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
+            names = dir([filepath 'hM_' subjects{n_sub} '_' conditions{n_condition} '*.set']);
+            names = {names.name};
+            for n_filename = 1:length(names)
+                if names{n_filename}(16) == num2str(n_trial)
+                    filename = names{n_filename};
+                    break
+                end
             end
-        end
-        mega_eeg{n_mega} = pop_loadset('filename', filename, ... 
-            'filepath', filepath, 'loadmode', 'all');
-        
-        % Create the MEGA BAD CHANNELS structure
-        load('dependencies/chan_labels', 'chan_labels');
-        bad_channels = cell(size(chan_labels));
-        n_channels = size(chan_labels);
-        for x = 1:n_channels(2)
-            if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
-                bad_channels{x} = chan_labels(x).labels;
+            mega_eeg{n_mega} = pop_loadset('filename', filename, ...
+                'filepath', filepath, 'loadmode', 'all');
+            
+            % Create the MEGA BAD CHANNELS structure
+            load('dependencies/chan_labels', 'chan_labels');
+            bad_channels = cell(size(chan_labels));
+            n_channels = size(chan_labels);
+            for x = 1:n_channels(2)
+                if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
+                    bad_channels{x} = chan_labels(x).labels;
+                end
             end
+            bad_channels = bad_channels(~cellfun('isempty',bad_channels));
+            mega_bad_channels{n_mega} = bad_channels;
+            
+            % Create the MEGA CONDITION structure
+            mega_condition{n_mega} = filename(4:16);
+            n_mega = n_mega + 1;
         end
-        bad_channels = bad_channels(~cellfun('isempty',bad_channels));
-        mega_bad_channels{n_mega} = bad_channels;
-        
-        % Create the MEGA CONDITION structure
-        mega_condition{n_mega} = filename(4:16);
-        n_mega = n_mega + 1;
-    end
-end
-
-% Add baseline
-filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
-names = dir([filepath 'hM_' subjects{n_sub} '_baseline*.set']);
-names = {names.name};
-filename = names{1};
-    
-mega_eeg{n_mega} = pop_loadset('filename', filename, 'filepath', ...
-    filepath, 'loadmode', 'all');
-
-% Create the MEGA BAD CHANNELS structure
-load('dependencies/chan_labels', 'chan_labels');
-bad_channels = cell(size(chan_labels));
-n_channels = size(chan_labels);
-for x = 1:n_channels(2)
-    if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
-        bad_channels{x} = chan_labels(x).labels;
-    end
-end
-bad_channels = bad_channels(~cellfun('isempty',bad_channels));
-mega_bad_channels{n_mega} = bad_channels;
-
-% Create the MEGA CONDITION structure
-mega_condition{n_mega} = filename(4:14);
-
-
-%% == 10) Prepare leadfield model ==============================
-cfg = [];
-cfg.headmodel = headmodel;
-cfg.resolution = 1;
-cfg.normalize = 'yes';
-cfg.grid.tight = 'yes';
-cfg.grid.resolution = 1;
-cfg.grid.unit = 'cm';
-cfg.elec = elec_aligned
-leadfield = ft_prepare_leadfield(cfg);
-
-% Double check the leadfield by plotting it
-figure();
-plot3(leadfield.pos(leadfield.inside,1), leadfield.pos(leadfield.inside,2), ...
-    leadfield.pos(leadfield.inside,3), 'k.');
-hold on;
-sens = ft_convert_units(elec_aligned, 'cm');
-ft_plot_sens(sens,'style', 'r*');
-
-%% == 11) Prepare EEG file ==============================
-eeg = eeglab2fieldtrip(EEG, 'timelockanalysis', 'none');
-% most of the next code expects the data to be an output of
-% ft_timelockanalysis!!!
-% Plot data
-cfg = [];
-cfg.elec = elec_aligned;
-layout = ft_prepare_layout(cfg, []);
-
-% So, you have two options here -- you'll figure it out once you do the
-% second pass
-cfg = [];
-cfg.layout = layout;
-cfg.showlabels = 'yes';
-ft_multiplotER(cfg, eeg)
-% remove bad electrodes and fiducials TO DO!
-    for x = 1:1
-        fidch = {'all', ['-' obj.fid_nas],['-' obj.fid_lpa],['-' obj.fid_rpa]};
-        channels = ft_channelselection(fidch, sens.label);
     end
     
-% or you can use ft_databrwoser = ft_databrower(cfg, data)
-
-%% == 11) Beamfomer ==============================
-
-% For this step you will need timelocked data!!!
-patchmodel_name = 'aal-coarse-13';
-PathModel = {'aal-coarse-13'};
-cov_avg = 'no';
-compute_lcmv_patch_filters = {'mode', 'single', 'fixedori', 1};
-cfg = []
-cfg.rawtrial = 'yes';
-cfg.method = 'lcmv';
-cfg.grid = leadfield;
-cfg.keepmom = 'yes';
-cfg.lambda = .01;
-cfg.elec = elec_aligned;
-cfg.headmodel = headmodel;
-% You have to feed ft_sourceanalysis to the covariance matrices!
-sourceanalysis = ft_sourceanalysis(cfg, covariances_trials)
-
-% Insert here the normalization using the baseline!
-
-% Plot source power and anatomical image; if you have issues here take a
-% look at here: http://www.fieldtriptoolbox.org/tutorial/beamformer
-% reslice
-cfg = [];
-resliced = ft_volumereslice(cfg, mri);
-% source is supposed to be one of the soruces (I think) you can check
-% fieldtrip later!
-source = rmfield(source,'time');
-% interpolate
-cfgin = [];
-cfgin.parameter = 'pow';
-interp = ft_sourceinterpolate(cfgin, source, resliced);
-
-
-% source plot
-cfg = [];
-cfg.funparameter = 'pow';
-cfg.method = 'slice';
-figure;
-ft_sourceplot(cfg, interp);
-
-% We now remove the outliers from this
-source = sourceanalysis;
-pow = source.avg.pow;
-% create an index
-idx = 1:length(pow);
-temp = [pow(:) idx(:)];
-% sort by source power
-sorted = sortrows(temp,-1);
-sorted(isnan(sorted(:,1)),:) = [];
-
-fprintf('found %d: %f\n', fliplr(sorted(1:n,:))');
-
-% get indices of top n sources
-idx_zero = sorted(1:n,2);
-% zero the top most
-pow(idx_zero) = NaN;
-
-% save data
-source.avg.pow = pow;
-
-
-%% == 11) Compute Cortical Patches ==============================
-% Get the AAL atlas and do a corase partition into 13 regions
-atlas_file = 'dependencies/fieldtrip-21092018/template/atlas/aal/ROI_MNI_V4.nii';
-
-
-patches = [];
-k = 1;
-patches(k).name = 'Prefrontal Left';
-patches(k).patterns = {...
-    'Frontal_Sup_L',...
-    'Frontal_Sup_Orb_L',...
-    'Frontal_Mid_L',...
-    'Frontal_Mid_Orb_L',...
-    'Frontal_Inf_Oper_L',...
-    'Frontal_Inf_Tri_L',...
-    'Frontal_Inf_Orb_L',...
-    'Frontal_Sup_Medial_L',...
-    'Frontal_Med_Orb_L',...
-    'Rolandic_Oper_L',...
-    'Rectus_L',...
-    'Olfactory_L'};
-k = k+1;
-
-patches(k).name = 'Prefrontal Right';
-patches(k).patterns = {...
-    'Frontal_Sup_R',...
-    'Frontal_Sup_Orb_R',...
-    'Frontal_Mid_R',...
-    'Frontal_Mid_Orb_R',...
-    'Frontal_Inf_Oper_R',...
-    'Frontal_Inf_Tri_R',...
-    'Frontal_Inf_Orb_R',...
-    'Frontal_Sup_Medial_R',...
-    'Frontal_Med_Orb_R',...
-    'Rolandic_Oper_R',...
-    'Rectus_R',...
-    'Olfactory_R'};
-k = k+1;
-
-
-patches(k).name = 'Motor Left';
-patches(k).patterns = {...
-    'Precentral_L',...
-    'Supp_Motor_Area_L'};
-k = k+1;
-
-
-
-patches(k).name = 'Motor Right';
-patches(k).patterns = {...
-    'Precentral_R',...
-    'Supp_Motor_Area_R'};
-k = k+1;
-
-patches(k).name = 'Basal Ganglia Left';
-patches(k).patterns = {...
-    'Pallidum_L',...
-    'Caudate_L',...
-    'Putamen_L',...
-    'Thalamus_L'};
-k = k+1;
-
-patches(k).name = 'Basal Ganglia Right';
-patches(k).patterns = {...
-    'Pallidum_R',...
-    'Caudate_R',...
-    'Putamen_R',...
-    'Thalamus_R'};
-k = k+1;
-
-
-
-patches(k).name = 'Insula Left';
-patches(k).patterns = {...
-    'Insula_L'};
-k = k + 1;
-
-
-patches(k).name = 'Insula Right';
-patches(k).patterns =  {...
-    'Insula_R'};
-k = k+1;
-
-
-patches(k).name = 'Parietal Left';
-patches(k).patterns = {...
-    'Parietal_Sup_L',...
-    'Parietal_Inf_L',...
-    'SupraMarginal_L',...
-    'Angular_L',...
-    'Precuneus_L',...
-    'Postcentral_L',...
-    'Paracentral_Lobule_L'};
-k = k+1;
-
-patches(k).name = 'Parietal Right';
-patches(k).patterns = {...
-    'Parietal_Sup_R',...
-    'Parietal_Inf_R',...
-    'SupraMarginal_R',...
-    'Angular_R',...
-    'Precuneus_R',...
-    'Postcentral_R',...
-    'Paracentral_Lobule_R'};
-k = k+1;
-
-
-
-patches(k).name = 'Temporal Left';
-patches(k).patterns = {...
-    'Temporal_Mid_L',...
-    'Temporal_Inf_L',...
-    'Temporal_Pole_Sup_L',...
-    'Temporal_Pole_Mid_L',...
-    'Temporal_Sup_L',...
-    'Heschl L'};
-k = k + 1;
-
-
-patches(k).name = 'Temporal Right';
-patches(k).patterns = {...
-    'Temporal_Mid_R',...
-    'Temporal_Inf_R',...
-    'Temporal_Pole_Sup_R',...
-    'Temporal_Pole_Mid_R',...
-    'Temporal_Sup_R',...
-    'Heschl R'};
-k = k+1;
-
-
-patches(k).name = 'Occipital Left';
-patches(k).patterns = {...
-    'Occipital_Sup_L',...
-    'Occipital_Mid_L',...
-    'Occipital_Inf_L',...
-    'Cuneus_L',...
-    'Fusiform_L',...
-    'Lingual_L',...
-    'Calcarine_L'};
-k = k+1;
-
-patches(k).name = 'Occipital Right';
-patches(k).patterns = {...
-    'Occipital_Sup_R',...
-    'Occipital_Mid_R',...
-    'Occipital_Inf_R',...
-    'Cuneus_R',...
-    'Fusiform_R',...
-    'Lingual_R',...
-    'Calcarine_R'};
-k = k+1;
-
-
-patches(k).name = 'Limbic Left';
-patches(k).patterns = {...
-    'Hippocampus_L',...
-    'ParaHippocampal_L',...
-    'Amygdala_L',...
-    'Cingulum_Ant_L',...
-    'Cingulum_Mid_L',...
-    'Cingulum_Post_L'};
-k = k+1;
-
-
-patches(k).name = 'Limbic Right';
-patches(k).patterns = {...
-    'Hippocampus_R',...
-    'ParaHippocampal_R',...
-    'Amygdala_R',...
-    'Cingulum_Ant_R',...
-    'Cingulum_Mid_R',...
-    'Cingulum_Post_R'};
-k = k+1;
-
-
-patches(k).name = 'Cerebellum Left';
-patches(k).patterns = {...
-    'Cerebelum_Crus1_L',...
-    'Cerebelum_Crus2_L',...
-    'Cerebelum_3_L',...
-    'Cerebelum_4 5_L',...
-    'Cerebelum_6_L',...
-    'Cerebelum_7b_L',...
-    'Cerebelum_8_L',...
-    'Cerebelum_9_L',...
-    'Cerebelum_10_L'};
-k = k+1;
-
-
-patches(k).name = 'Cerebellum Right';
-patches(k).patterns = {...
-    'Cerebelum_Crus1_R',...
-    'Cerebelum_Crus2_R',...
-    'Cerebelum_3_R',...
-    'Cerebelum_4 5_R',...
-    'Cerebelum_6_R',...
-    'Cerebelum_7b_R',...
-    'Cerebelum_8_R',...
-    'Cerebelum_9_R',...
-    'Cerebelum_10_R'};
-k = k+1;
-
-patches(k).name = 'Cerebellum Mid';
-patches(k).patterns = {...
-    'Vermis_1_2',...
-    'Vermis_3',...
-    'Vermis_4_5',...
-    'Vermis_6',...
-    'Vermis_7',...
-    'Vermis_8',...
-    'Vermis_9',...
-    'Vermis_10'};
-
-
-atlas = ft_read_atlas(atlas_file);
-atlas = ft_convert_units(atlas, leadfield.unit);
-patches_matrix = [];
-patches_matrix.label = {};
-patches_matrix.basis = {};
-patches_matrix.leadfield = {};
-patches_matrix.inside = {};
-patches_matrix.centroid = {};
-
-% Get the basis for each of the patches, starting here, you will need
-% to loop this for each patch!
-
-for n_patch = 1:length(patches)
-    % Select points in anatomical regions that make up the patch
+    % Add baseline
+    filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
+    names = dir([filepath 'hM_' subjects{n_sub} '_baseline*.set']);
+    names = {names.name};
+    filename = names{1};
+    
+    mega_eeg{n_mega} = pop_loadset('filename', filename, 'filepath', ...
+        filepath, 'loadmode', 'all');
+    
+    % Create the MEGA BAD CHANNELS structure
+    load('dependencies/chan_labels', 'chan_labels');
+    bad_channels = cell(size(chan_labels));
+    n_channels = size(chan_labels);
+    for x = 1:n_channels(2)
+        if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
+            bad_channels{x} = chan_labels(x).labels;
+        end
+    end
+    bad_channels = bad_channels(~cellfun('isempty',bad_channels));
+    mega_bad_channels{n_mega} = bad_channels;
+    
+    % Create the MEGA CONDITION structure
+    mega_condition{n_mega} = filename(4:14);
+    
+    % Do a quick round of interpolation
+    for n_trial = 1:length(mega_eeg)
+        mega_eeg{n_trial} = pop_interp(mega_eeg{n_trial}, chan_labels, 'spherical');
+    end
+    
+    % Create fieldtrip preprocessing data structure from scratch
+    % 1. Flag channels that were rejected in all trials
+    bad_electrodes = {};
+    bad_electrodes = mega_bad_channels{1};
+    for n_elec = 1:(length(mega_bad_channels))
+        bad_electrodes = intersect(bad_electrodes, mega_bad_channels{n_elec});
+    end
+    bad_electrodes = unique(bad_electrodes);
+    
+    
+    % 2. Get smallest value duration from mega_eeg
+    min_duration = length(mega_eeg{n_trial}.times);
+    for n_trial = 1:(length(mega_eeg))
+        if min_duration > length(mega_eeg{n_trial}.times)
+            min_duration = length(mega_eeg{n_trial}.times);
+            min_duration_arg = n_trial;
+        end
+    end
+    
+    %% Create the fieldtrip data structure - shortened version for cov
+    data = [];
+    
+    label = {};
+    for n_elec = 1:numel(chan_labels)
+        label{n_elec} = chan_labels(n_elec).labels;
+    end
+    data.label = label';
+    
+    data.fsample = mega_eeg{1}.srate;
+    
+    trial = {};
+    for n_trial = 1:numel(mega_eeg)
+        trial{n_trial} = mega_eeg{n_trial}.data(:, 1:min_duration);
+    end
+    data.trial =  trial;
+    time = {};
+    for n_trial = 1:numel(mega_eeg)
+        time{n_trial} = mega_eeg{min_duration_arg}.times;
+    end
+    data.time = time;
+    
+    % Take out channels that were bad in all trials
+    bad_elec_struct = {'all'};
+    for n_elec = 1:length(bad_electrodes)
+        bad_elec_struct = [bad_elec_struct, ['-' bad_electrodes{n_elec}]];
+    end
     cfg = [];
-    cfg.atlas = atlas;
-    cfg.inputcoord = atlas.coordsys;
-    cfg.roi = patches(n_patch).patterns;
-    mask = ft_volumelookup(cfg, leadfield);
+    cfg.channel = bad_elec_struct;
+    data = ft_preprocessing(cfg, data);
     
-    % choose leadfield vertices inside the mask
-    inside = leadfield.inside & mask(:);
+    %% Create the fieldtrip data structure - all the trials
+    data_full = [];
     
-    %     % Plot this just in case
-    %     figure;
-    %     % plot all inside points
-    %     ft_plot_mesh(leadfield.pos(leadfield.inside,:),'vertexcolor','g');
-    %     hold on;
-    %     % plot patch points
-    %     ft_plot_mesh(leadfield.pos(mask,:));
+    label = {};
+    for n_elec = 1:numel(chan_labels)
+        label{n_elec} = chan_labels(n_elec).labels;
+    end
+    data_full.label = label'; % cell-array containing strings, Nchan*1
     
+    data_full.fsample = mega_eeg{1}.srate; % sampling frequency in Hz, single number
     
-    % get leadfields in patch
-    lf_patch = leadfield.leadfield(inside);
+    trial = {};
+    for n_trial = 1:numel(mega_eeg)
+        trial{n_trial} = mega_eeg{n_trial}.data(:, :);
+    end
+    data_full.trial =  trial;
+    time = {};
+    for n_trial = 1:numel(mega_eeg)
+        time{n_trial} = mega_eeg{n_trial}.times;
+    end
+    data_full.time = time;
     
-    % concatenate intoa single wide matrix
-    % n_channels x (3 * points in the patch)
-    Hk = [lf_patch{:}];
+    % Take out channels that were bad in all trials
+    bad_elec_struct = {'all'};
+    for n_elec = 1:length(bad_electrodes)
+        bad_elec_struct = [bad_elec_struct, ['-' bad_electrodes{n_elec}]];
+    end
     
-    % assume Gamma = I, i.e. white noise
-    % otherwise
-    %   L = chol(Gamma);
-    %   Hk_tilde = L*Hk;
+    cfg = [];
+    cfg.channel = bad_elec_struct;
+    data_full = ft_preprocessing(cfg, data_full);
     
-    % generate basis for patch
+    elec_to_prune = [bad_elec_struct, {'all', '-LPA', '-NZ', '-RPA', '-Ground', '-A-63', '-A-64'}];
+    elec_aligned_pruned = ft_channelselection(elec_to_prune, elec_aligned);
     
-    % assume Gamma = I, i.e. white noise
-    % otherwise
-    %   L = chol(Gamma);
-    %   Hk_tilde = L*Hk;
+    %% == 10) Prepare leadfield model ==============================
+    cfg = [];
+    cfg.channel = elec_aligned_pruned;
+    cfg.headmodel = headmodel;
+    cfg.resolution = 1;
+    cfg.normalize = 'yes';
+    cfg.grid.tight = 'yes';
+    cfg.grid.resolution = 1;
+    cfg.grid.unit = 'cm';
+    cfg.elec = elec_aligned;
+    leadfield = ft_prepare_leadfield(cfg);
     
-    % take SVD of Hk
-    % S elements are in decreasing order
-    [U,Sk,~] = svd(Hk);
-    nsingular = size(Sk,1);
-    Uk = [];
-    % select the minimum number of singular values
-    for j=1:nsingular
-        % NOTE if Gamma ~= I
-        %   Uk_tilde = L*Uk;
+    % Double check the leadfield by plotting it
+    figure();
+    plot3(leadfield.pos(leadfield.inside,1), leadfield.pos(leadfield.inside,2), ...
+        leadfield.pos(leadfield.inside,3), 'k.');
+    hold on;
+    sens = ft_convert_units(elec_aligned, 'cm');
+    ft_plot_sens(sens,'style', 'r*');
+    close all
+    
+    %% == 11) Compute Cortical Patches ==============================
+    % Get the AAL atlas and do a corase partition into 19 regions
+    atlas_file = 'dependencies/fieldtrip-21092018/template/atlas/aal/ROI_MNI_V4.nii';
+    patches = load('dependencies/aal-coarse-19.mat');
+    patches = patches.patches;
+    
+    atlas = ft_read_atlas(atlas_file);
+    atlas = ft_convert_units(atlas, leadfield.unit);
+    patches_matrix = [];
+    patches_matrix.label = {};
+    patches_matrix.basis = {};
+    patches_matrix.leadfield = {};
+    patches_matrix.inside = {};
+    patches_matrix.centroid = {};
+    
+    % Get the basis for each of the patches
+    
+    for n_patch = 1:length(patches)
+        % Select points in anatomical regions that make up the patch
+        cfg = [];
+        cfg.atlas = atlas;
+        cfg.inputcoord = atlas.coordsys;
+        cfg.roi = patches(n_patch).patterns;
+        mask = ft_volumelookup(cfg, leadfield);
         
-        % select j left singular vectors corresponding to largest singular
-        % values
-        Uk = U(:,1:j);
+        % choose leadfield vertices inside the mask
+        inside = leadfield.inside & mask(:);
         
-        % compute the representation accuracy
-        gammak = trace(Hk'*(Uk*Uk')*Hk)/trace(Hk'*Hk);
+        % Plot this just in case
+        figure;
+        % plot all inside points
+        ft_plot_mesh(leadfield.pos(leadfield.inside,:),'vertexcolor','g');
+        hold on;
+        % plot patch points
+        ft_plot_mesh(leadfield.pos(mask,:));
+        close all
         
-        % check if we've reached the threshold
-        if gammak > 0.85 % this is the eta parameter, or the
-            %       representation accuracy, ideally should be close to 1 but it will
-            %       also lose its ability to differentiate other patches and resolution
-            %       will suffer, see Limpiti2006 for more
-            % use the current Uk
-            break;
+        % get leadfields in patch
+        lf_patch = leadfield.leadfield(inside);
+        
+        % concatenate intoa single wide matrix
+        % n_channels x (3 * points in the patch)
+        Hk = [lf_patch{:}];
+        
+        
+        % generate basis for patch
+        
+        % assume Gamma = I, i.e. white noise
+        % otherwise
+        %   L = chol(Gamma);
+        %   Hk_tilde = L*Hk;
+        
+        % take SVD of Hk
+        % S elements are in decreasing order
+        [U,Sk,~] = svd(Hk);
+        nsingular = size(Sk,1);
+        Uk = [];
+        % select the minimum number of singular values
+        for j=1:nsingular
+            % NOTE if Gamma ~= I
+            %   Uk_tilde = L*Uk;
+            
+            % select j left singular vectors corresponding to largest singular
+            % values
+            Uk = U(:,1:j);
+            
+            % compute the representation accuracy
+            gammak = trace(Hk'*(Uk*Uk')*Hk)/trace(Hk'*Hk);
+            
+            % check if we've reached the threshold
+            if gammak > 0.85 % this is the eta parameter, or the
+                %       representation accuracy, ideally should be close to 1 but it will
+                %       also lose its ability to differentiate other patches and resolution
+                %       will suffer, see Limpiti2006 for more
+                % use the current Uk
+                break;
+            end
         end
+        
+        
+        % compute centroid
+        locs = leadfield.pos(inside,:);
+        centroid =  mean(locs,1);
+        
+        % save all information!
+        patches_matrix(n_patch).label = patches(n_patch).name;
+        patches_matrix(n_patch).basis = Uk;
+        patches_matrix(n_patch).leadfield = Hk;
+        patches_matrix(n_patch).inside = inside;
+        patches_matrix(n_patch).centroid = centroid;
     end
     
+    %% We have a forward model. Now compute the spatial filters
+    % Get the covariance matrix
+    cov_avg = zeros(length(data.label), length(data.label), length(data.trial));
     
-    % compute centroid
-    locs = leadfield.pos(inside,:);
-    centroid =  mean(locs,1);
-    
-    % save all information!
-    patches_matrix(n_patch).label = patches(n_patch).name;
-    patches_matrix(n_patch).basis = Uk;
-    patches_matrix(n_patch).leadfield = Hk;
-    patches_matrix(n_patch).inside = inside;
-    patches_matrix(n_patch).centroid = centroid;
-    
-end
-
-% We have a forward model. Now compute the spatial filters
-
-% allocate mem
-source = [];
-source.filters = cell(size(leadfield.leadfield));
-source.patch_labels = cell(size(leadfield.leadfield));
-source.inside = false(size(leadfield.inside));
-source.patch_centroid = zeros(length(leadfield.inside),3);
-
-% NOTE when supplying ft_sourceanalysis with filters, i can only specify
-% one per grid point, not per trial, so this function can only operate on a
-% single covariance
-data = eeg;
-
-% We can only compute filters with one cov, so we need to use single
-% trials covariance.
-
-ndims_cov = length(size(data.cov));
-if ndims_cov == 3
-    ntrials = size(data.cov,1);
-    if ntrials == 1
-        data.cov = squeeze(data.cov);
+    for n_trial = 1:length(data.trial)
+        cov_avg(:, :, n_trial) = data.trial{n_trial} * data.trial{n_trial}';
     end
-else
-    ntrials = 1;
-end
-
-% computer filter for each patch
-for n_patch=1:length(patches_matrix)
-    fprintf('Computing filter for patch: %s\n',patches_matrix(n_patch).label);
     
-    if isempty(patches_matrix(n_patch).basis)
-        filter = zeros(1,size(data.cov,1));
-    else
+    cov_avg = mean(cov_avg, 3);
+    
+    % allocate mem
+    source = [];
+    source.filters = cell(length(patches_matrix), 1);
+    source.patch_labels = cell(length(patches_matrix), 1);
+    source.patch_centroid = zeros(length(leadfield.inside),3);
+    source.inside = false(size(leadfield.inside));
+    
+    
+    % computer filter for each patch
+    for n_patch=1:length(patches_matrix)
+        fprintf('Computing filter for patch: %s\n',patches_matrix(n_patch).label);
+        
+        
         % get the patch basis
         Uk = patches_matrix(n_patch).basis;
         
-        Yk = Uk'*pinv(data.cov)*Uk;
+        Yk = Uk'*pinv(cov_avg)*Uk;
+        
+        
+        % Moment orientation is unkown, so we maximize the power
+        
+        % ordered from smallest to largest
+        [V,D] = eig(Yk);
+        d = diag(D);
+        [~,idx] = sort(d(:),1,'ascend');
+        
+        % select the eigenvector corresponding to the smallest eigenvalue
+        vk = V(:,idx(1));
+        
+        % compute patch filter weights
+        filter = pinv(vk'*Yk*vk)*pinv(cov_avg)*Uk*vk;
+        filter = filter';
+        
+        % save patch filter
+        source.filters{n_patch} = filter;
+        
+        % save patch label for each point
+        source.patch_labels{n_patch} = patches_matrix(n_patch).label;
+        
+        % save centroid
+        nverts = sum(patches_matrix(n_patch).inside);
+        source.patch_centroid(patches_matrix(n_patch).inside,:) = ...
+            repmat(patches_matrix(n_patch).centroid,nverts,1);
+        
+        
+        
+        source.inside = leadfield.inside;
+        
     end
     
-    % Moment orientation is unkown, so we maximize the power
+    % Now that you have the patches, we get the data
+    % save filters
+    leadfield.filter = source.filters;
+    leadfield.filter_label = source.patch_labels;
+    leadfield.patch_centroid = source.patch_centroid;
+    leadfield.inside = source.inside;
     
-    % ordered from smallest to largest
-    [V,D] = eig(Yk);
-    d = diag(D);
-    [~,idx] = sort(d(:),1,'ascend');
+    % Get source data
+    cortical_patches = zeros(length(leadfield.filter), length(data.label));
+    for n_patch = 1:length(leadfield.filter)
+        cortical_patches(n_patch, :) = leadfield.filter{n_patch};
+    end
     
-    % select the eigenvector corresponding to the smallest eigenvalue
-    vk = V(:,idx(1));
+    source_data = [];
+    source_data.leadfield = leadfield;
+    source_data.trials_labels = mega_condition';
+    source_data.bad_electrodes = bad_electrodes;
+    source_data.source_label = leadfield.filter_label;
+    source_data.sources = cell(length(data.trial), 1);
+    source_data.fsample = data_full.fsample;
+    source_data.times = data_full.time';
+    source_data.chan_label = data_full.label;
     
-    % compute patch filter weights
-    filter = pinv(vk'*Yk*vk)*pinv(data.cov)*Uk*vk;
-    filter = filter';
+    for n_trial = 1:length(data_full.trial)
+        source_data.sources{n_trial} = cortical_patches * data_full.trial{n_trial};
+    end
     
-    % set patch filter at each point in patch
-    [source.filters{patches_matrix(n_patch).inside}] = deal(filter);
-    % Yes, this is redundant, but it keeps everything else in Fieldtrip working
-    % as normal
+    save(['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_sources.mat'], 'source_data');
+end
+
+%% We first plot the power average on the mri template from each of the cortical patches
+for n_patch = 1:length(leadfield.filter)
+    filt_seed = leadfield.filter{n_patch};
     
-    % save patch label for each point
-    [source.patch_labels{patches_matrix(n_patch).inside}] = deal(patches_matrix(n_patch).label);
-    
-    % save centroid
-    nverts = sum(patches_matrix(n_patch).inside);
-    source.patch_centroid(patches_matrix(n_patch).inside,:) = ...
-        repmat(patches_matrix(n_patch).centroid,nverts,1);
-    
-    
-    % set empty filters to zero
-    
-    % check which filters are empty
-    grid_empty = cellfun('isempty',source.filters);
-    % select those that are inside only
-    grid_empty = grid_empty' & leadfield.inside;
-    % create a filter with zeros
-    filter = zeros(size(filter));
-    [source.filters{grid_empty}] = deal(filter);
-    
-    % check which labels are empty
-    grid_empty = cellfun('isempty',source.patch_labels);
-    [source.patch_labels{grid_empty}] = deal('');
-    
+    % create source struct
+    source = [];
+    source.dim = leadfield.dim;
+    source.pos = leadfield.pos;
     source.inside = leadfield.inside;
+    source.method = 'average';
+    source.avg.pow = zeros(size(leadfield.inside));
     
-end
-
-% Now that you have the patches, we get the data
-% save filters
-leadfield.filter = source.filters;
-leadfield.filter_label = source.patch_labels;
-leadfield.patch_centroid = source.patch_centroid;
-leadfield.inside = source.inside;
-
-% You can calculate the output of the filters here using
-% ft_sourceanalysis: Besides the source positions, you may also include previously computed
-%   spatial filters and/or leadfields like this
-%     cfg.grid.filter
-%     cfg.grid.leadfield
-
-
-%% Some function to perform some plotting so you can check everything is
-% good!
-% Now we plot the beamformer pattern
-% First, choose the seed
-filt_seed = leadfield(1).filter
-
-% create source struct
-source = [];
-source.dim = leadfield.dim;
-source.pos = leadfield.pos;
-source.inside = leadfield.inside;
-source.method = 'average';
-source.avg.pow = zeros(size(leadfield.inside));
-
-for i=1:length(leadfield.inside)
-    if leadfield.inside(i)
-        source.avg.pow(i) = norm(filt_seed*leadfield.leadfield{i},'fro');
+    for i=1:length(leadfield.inside)
+        if leadfield.inside(i)
+            source.avg.pow(i) = norm(filt_seed*leadfield.leadfield{i},'fro');
+        end
     end
-end
-cfgin = [];
-resliced = ft_volumereslice(cfgin, mri);
-source = rmfield(source,'time');
-cfgin = [];
-cfgin.parameter = 'pow';
-interp = ft_sourceinterpolate(cfgin, source, resliced);
-% source plot
-cfgplot = [];
-if ~isempty(p.Results.options)
-    % copy options
-    cfgplot = copyfields(p.Results.options, cfgplot, fieldnames(p.Results.options));
-end
-
-if isfield(cfgplot,'mask') && ~isempty(p.Results.mask)
-    warning('overwriting mask field');
-end
-switch p.Results.mask
-    case 'thresh'
-        fprintf('creating mask\n');
-        cfgplot.maskparameter = 'mask';
-        interp.mask = interp.pow > max(interp.pow(:))*p.Results.thresh;
-    case 'none'
-        % none
+    
+    cfgin = [];
+    resliced = ft_volumereslice(cfgin, mri);
+    cfgin = [];
+    cfgin.parameter = 'pow';
+    interp = ft_sourceinterpolate(cfgin, source, resliced);
+    % source plot
+    cfgplot = [];
+    cfgplot.method = 'slice';
+    cfgplot.funparameter = 'pow';
+    cfgplot.maskparameter = cfgplot.funparameter;
+    cfgplot.funcolorlim   = [0.4 0.8];
+    cfgplot.opacitylim    = [0.4 0.8];
+    cfgplot.opacitymap    = 'rampup';
+    cfgplot.title = leadfield.filter_label{n_patch};
+    ft_sourceplot(cfgplot, interp);
 end
 
-cfgplot.method = p.Results.method;
-cfgplot.funparameter = 'pow';
-ft_sourceplot(cfgplot, interp);
 
-
+%% Patch resolution on anatomical image
 % You can also plot the patch resolution on an anatomical image
 % equation 14 of Limpiti2006
 %function plot_patch_resolution(obj,seed,varargin)
@@ -1098,143 +867,38 @@ ft_sourceplot(cfgplot, interp);
 %   wrt a seed location and is represented by eq (14) of
 %   Limpiti2006
 %
-%   Inputs
-%   ------
-%   seed (string or scalar)
-%       seed patch, you can specify an patch label or an index
-%
-%   Parameters
-%   ----------
-%   method (default = 'slice')
-%       plotting method: slice or ortho
-%
-%   options (struct)
-%       options for ft_sourceplot, see ft_sourceplot
-
-p = inputParser;
-p.StructExpand = false;
-addRequired(p,'seed');
-parse(p,seed);
-
-% load patches
-patches = ftb.util.loadvar(obj.patches);
-
-% find filter corresponding to the seed
-if ischar(p.Results.seed)
-    % find a patch corresponding to the label
-    match = lumberjack.strfindlisti({patches.name}, p.Results.seed);
-    if ~any(match)
-        error('could not find %s', p.Results.seed);
-    end
-    U_seed = patches(match).U;
-elseif isscalar(p.Results.seed)
-    % use index
-    U_seed = patches(p.Results.see).U;
-else
-    error(['ftb:' mfilename],...
-        'unknown seed type');
-end
-
-% load leadfield
-leadfield = ftb.util.loadvar(obj.lf.leadfield);
-
-% create source struct
-source = [];
-source.dim = leadfield.dim;
-source.pos = leadfield.pos;
-source.inside = leadfield.inside;
-source.method = 'average';
-source.avg.pow = zeros(size(leadfield.inside));
-
-for i=1:length(patches)
-    H = patches(i).H;
-    delta = trace(H'*(U_seed*U_seed')*H)/trace(H'*H);
-    source.avg.pow(patches(i).inside) = delta;
-end
-
-% get MRI object
-mriObj = obj.get_dep('ftb.MRI');
-% load mri data
-mri = ftb.util.loadvar(mriObj.mri_mat);
-
-obj.plot_anatomical_deps(mri,source,varargin{:});
-
-%function plot_anatomical_deps(~,mri,source,varargin)
-%PLOT_ANATOMICAL_DEPS plots source power on anatomical image
-%   PLOT_ANATOMICAL_DEPS(obj, ['method', value, 'options', value]) plots source
-%   power on anatomical images. Method can be 'slice' or 'ortho'.
-%
-%   Input
-%   -----
-%   mri (struct)
-%       mri data, ftb.MRI.mri_mat
-%   source (struct)
-%       source analysis data, ftb.Beamformer.sourceanalysis
-%
-%   Parameters
-%   ----------
-%   method (default = 'slice')
-%       plotting method: slice or ortho
-%   options (struct)
-%       options for ft_sourceplot, see ft_sourceplot
-%   mask (default = 'none')
-%       mask for functional data, if using this opt
-%       thresh - plots values above a threshold
-%       none - no mask
-%   thresh (default = 0.5)
-%       threshold for mask = 'thresh', calculated as a factor
-%       of the maximum power
-
-% parse inputs
-p = inputParser;
-p.StructExpand = false;
-addParameter(p,'method','slice',@(x)any(validatestring(x,{'slice','ortho'})));
-addParameter(p,'options',[]);
-addParameter(p,'mask','none',@(x)any(validatestring(x,{'thresh','none'})));
-addParameter(p,'thresh',0.5,@isnumeric);
-parse(p,varargin{:});
 
 % reslice
-% TODO save instead of redoing
 cfgin = [];
 resliced = ft_volumereslice(cfgin, mri);
 
-if isfield(source,'time')
-    source = rmfield(source,'time');
+% create source struct
+for n_patch = 1:length(patches_matrix)
+    source = [];
+    source.dim = leadfield.dim;
+    source.pos = leadfield.pos;
+    source.inside = leadfield.inside;
+    source.method = 'average';
+    source.avg.pow = zeros(size(leadfield.inside));
+    
+    H = patches_matrix(n_patch).leadfield;
+    U_seed = patches_matrix(n_patch).basis;
+    delta = trace(H'*(U_seed*U_seed')*H)/trace(H'*H);
+    source.avg.pow(patches_matrix(n_patch).inside) = delta;
+    
+    % interpolate
+    cfgin = [];
+    cfgin.parameter = 'pow';
+    interp = ft_sourceinterpolate(cfgin, source, resliced);
+    
+    % source plot
+    cfgplot = [];
+    cfgplot.maskparameter = 'mask';
+    interp.mask = interp.pow > max(interp.pow(:))*0.5;
+    cfgplot.method = 'slice';
+    cfgplot.funparameter = 'pow';
+    
+    ft_sourceplot(cfgplot, interp);
+    saveas(gcf,['figs/' patches_matrix(n_patch).label '.png']);
+    close all
 end
-
-
-% interpolate
-cfgin = [];
-cfgin.parameter = 'pow';
-interp = ft_sourceinterpolate(cfgin, source, resliced);
-
-% data transformation
-plot_log = false;
-if plot_log
-    interp.pow = db(interp.pow,'power');
-end
-
-% source plot
-cfgplot = [];
-if ~isempty(p.Results.options)
-    % copy options
-    cfgplot = copyfields(p.Results.options, cfgplot, fieldnames(p.Results.options));
-end
-
-if isfield(cfgplot,'mask') && ~isempty(p.Results.mask)
-    warning('overwriting mask field');
-end
-switch p.Results.mask
-    case 'thresh'
-        fprintf('creating mask\n');
-        cfgplot.maskparameter = 'mask';
-        interp.mask = interp.pow > max(interp.pow(:))*p.Results.thresh;
-    case 'none'
-        % none
-end
-
-cfgplot.method = p.Results.method;
-cfgplot.funparameter = 'pow';
-ft_sourceplot(cfgplot, interp);
-
