@@ -5,7 +5,7 @@ hyperMusic code is free software: you can redistribute
 it and/or modify it under the terms of the GNU General Public License as
 published by the Free Software Foundation,
 either version 3 of the License, or (at your option) any later version.
-megFingerprinting is distributed in the hope that it will be useful, but
+hyperMusic is distributed in the hope that it will be useful, but
 WITHOUT ANY WARRANTY; without even the
 implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 See the GNU General Public License for
@@ -36,21 +36,30 @@ Makoto's preprocessing pipeline
 
 %% == hyperMusic: Preprocessing =========================================
 %{
-2) Load file and delete extra events
-3) High pass filter 1 Hz (Hamming windowed sinc FIR)
-4) Load channel locations and delete extra channels
-5) Take out line noise using spectral regression
-5) Run artifact subspace reconstruction
-6) Get info regarding interpolated channels
-7) Interpolate bad channels using spherical method
-8) Perform CAR
-9) Trim data around trigger event
-10) Save output .set file
-11) Write bad channels to txt file
-1) Headmodel based on based on ICBM 152 atlas
+1. Setup path, dependencies, and important variables
+2. Create headmodel based on ICBM 152
+3. Electrode allignment with template (interactive step)
+4. Load data
+5. High pass filter @ 0.5 Hz (Hamming FIR)
+6. Load channel location file
+7. Trim data from third event to end of data 
+8. Take out line noise using spectral regression
+9. Run clean_rawdata
+10. Common Average Reference
+11. Output EEG lab file and save it
+12. Process baseline using same steps
+13. Prepare the EEG file
+14. Spherical interpolation
+15. EEG to Fieldtrip structure 
+16. Prepare the leadfield model 
+17. Compute cortical patches basis functions (forward model)
+18. LCMV criterion spatial filters for each patch 
+19. Get patches time series
+20. Plot average power of each patch on MRI scan
+21. Plot patch resolution on anatomical image
 %}
 
-%% == 0) Setup path ======================================================
+%% == 1) Setup path, dependencies, and important variables ===============
 addpath('dependencies/');
 addpath('dependencies/mni152')
 addpath('dependencies/spm12/')
@@ -62,8 +71,24 @@ ft_defaults
 global ft_default
 ft_default.spmversion='spm12';
 
-%% == 1) Headmodel based on based on ICBM 152 atlas ==================
-% This bit is the MRI step of the pipeline
+% Initilize EEGLAB and get participants and pairs names
+fileID = fopen('data/pair_codes.csv');
+participant_info = textscan(fileID,'%s %s', 'Delimiter', ','); % code, pair
+subjects = participant_info{1};
+pairs = participant_info{2};
+fclose(fileID);
+load('dependencies/64ch_withoutA1A2.mat');
+ch_names = squeeze(Mon.electrodename);
+
+% Get the duration and time csv files
+fileID = fopen('dependencies/play_start_duration.csv');
+start_duration = textscan(fileID,'%s %f %s %f %f', 'Delimiter', ',');
+fclose(fileID);
+
+% Prepare names of stimuli
+conditions = {'hmel', 'hval', 'pclo', 'pcan'};
+
+%% == 2) Headmodel based on based on ICBM 152 atlas ======================
 % load MRI data for ICMB 152
 mri = ft_read_mri('dependencies/mni152/MNI152_T1_0.5mm.nii');
 mri.coordsys = 'mni';
@@ -212,9 +237,9 @@ for j=1:size(fid_pos,1)
     text(fid_pos(j,1), fid_pos(j,2), fid_pos(j,3), fid_names{j});
 end
 
+%% == 3) Electrode allignment with template =============================
 for n_sub=5:6 %length(subjects)
-    %% == 9) Electrode allignment with template ==============================
-    % It is easier if you run all the participants at once!
+    
     % Properties
     chan_locs = ['data/raw/' pairs{n_sub} '/eeg/hM_EEGDIGI_' subjects{n_sub} '.sfp'];
     elec = ft_read_sens(chan_locs, 'senstype', 'eeg');
@@ -275,23 +300,7 @@ for n_sub=5:6 %length(subjects)
     close all
 end
 
-%% == 1) Load data and setup parameters ==================================
-% Initilize EEGLAB and get participants and pairs names
-fileID = fopen('data/pair_codes.csv');
-participant_info = textscan(fileID,'%s %s', 'Delimiter', ','); % code, pair
-subjects = participant_info{1};
-pairs = participant_info{2};
-fclose(fileID);
-load('dependencies/64ch_withoutA1A2.mat');
-ch_names = squeeze(Mon.electrodename);
-
-% Get the duration and time csv files
-fileID = fopen('dependencies/play_start_duration.csv');
-start_duration = textscan(fileID,'%s %f %s %f %f', 'Delimiter', ',');
-fclose(fileID);
-
-% Prepare names of stimuli
-conditions = {'hmel', 'hval', 'pclo', 'pcan'};
+%% == 4) Load data and setup parameters ==================================
 
 for n_sub=5:6 %length(subjects)
     mega_eeg = {};
@@ -321,17 +330,17 @@ for n_sub=5:6 %length(subjects)
                 EEG = pop_editeventvals(EEG,'delete',1);
             end
             
-            %% == 2) High pass filter @ 0.5 Hz ==================================
+            %% == 5) High pass filter @ 0.5 Hz ==================================
             % default filtering strategy using Hamming window
             EEG = pop_eegfiltnew(EEG, 0.5, []);
             
-            %% == 3) Load channel location file ==============================
+            %% == 6) Load channel location file ==============================
             EEG = pop_chanedit(EEG, 'load',{chan_locs 'filetype' 'sfp'}, ...
                 'changefield',{4 'datachan' 0});
             EEG = pop_select( EEG,'nochannel',{'A-63' 'A-64'});
             chan_labels = EEG.chanlocs;
             
-            %% == 4) Trim data from third event to end of data =============
+            %% == 7) Trim data from third event to end of data =============
             % Search for the value in the play_start_duration file
             for n_duration = 1:length(start_duration{1})
                 if strcmp(start_duration{1}{n_duration}, pairs{n_sub}) & ...
@@ -345,10 +354,7 @@ for n_sub=5:6 %length(subjects)
                 end
             end
             
-            %% == 5) Common Average References ===========================
-            EEG = fullRankAveRef(EEG);
-            
-            %% == 6) Take out line noise using spectral regression =======
+            %% == 8) Take out line noise using spectral regression =======
             % I use step size == window size (Makoto suggestion)
             EEG = pop_cleanline(EEG, 'Bandwidth',2,'ChanCompIndices',[1:62], ...
                 'ComputeSpectralPower', true, 'LineFrequencies',[60 120], ...
@@ -358,12 +364,12 @@ for n_sub=5:6 %length(subjects)
                 'SlidingWinLength', 4,'SlidingWinStep', 4);
             close all;
             
-            %% == 7) Run Artifact Subspace Reconstruction ================
+            %% == 9) Run Artifact Subspace Reconstruction ================
             % Run ASR, use 8 SD because data is very artifactual
             % -> high-pass filtering disabled (we are already doing that)
             % -> noise based rejection disabled
             % -> bad window disabled because we cannot afford to loose data
-            EEG = clean_rawdata(EEG, 5, 'off', 0.85, 'off', 8, 'off');
+            EEG = clean_rawdata(EEG, 5, 'off', 0.75, 'off', 8, 'off');
             
             % Get info regarding rejected channels
             bad_channels = cell(size(chan_labels));
@@ -387,7 +393,10 @@ for n_sub=5:6 %length(subjects)
             end
             fclose(fid);
             
-            %% == 8) Output EEG lab file and save it =====================
+            %% == 10) Common Average References ==========================
+            EEG = fullRankAveRef(EEG);
+            
+            %% == 11) Output EEG lab file and save it ====================
             EEGout = pop_saveset(EEG, 'filename',[filename(1:16) '.set'],'filepath', [output pairs{n_sub} '/']);
             mega_bad_channels{n_mega} = bad_channels;
             mega_eeg{n_mega} = EEG;
@@ -395,7 +404,7 @@ for n_sub=5:6 %length(subjects)
             n_mega = n_mega + 1;
         end
     end
-    %% == 9) Process baseline using the same steps =======================
+    %% == 12) Process baseline using the same steps =======================
     names = dir([filepath 'hM_' subjects{n_sub} '_baseline*.hdf5']);
     names = {names.name};
     filename = names{1};
@@ -416,9 +425,6 @@ for n_sub=5:6 %length(subjects)
     EEG = pop_select( EEG,'nochannel',{'A-63' 'A-64'});
     chan_labels = EEG.chanlocs;
     
-    % == Common Average References ===========================
-    EEG = fullRankAveRef(EEG);
-    
     % == Take out line noise using spectral regression ===========
     % I use step size == window size (Makoto suggestion)
     EEG = pop_cleanline(EEG, 'Bandwidth',2,'ChanCompIndices',[1:62], ...
@@ -434,7 +440,7 @@ for n_sub=5:6 %length(subjects)
     % -> high-pass filtering disabled (we are already doing that)
     % -> noise based rejection disabled
     % -> bad window disabled because we cannot afford to loose data
-    EEG = clean_rawdata(EEG, 5, 'off', 0.85, 'off', 8, 'off');
+    EEG = clean_rawdata(EEG, 5, 'off', 0.75, 'off', 8, 'off');
     
     % Get info regarding rejected channels
     bad_channels = cell(size(chan_labels));
@@ -458,15 +464,18 @@ for n_sub=5:6 %length(subjects)
     end
     fclose(fid);
     
+    % == Common Average References ===========================
+    EEG = fullRankAveRef(EEG);
+    
     % == Output EEG lab file and save it =====================
     EEGout = pop_saveset(EEG, 'filename',[filename(1:14) '.set'],'filepath', [output pairs{n_sub} '/']);
     mega_bad_channels{n_mega} = bad_channels;
     mega_eeg{n_mega} = EEG;
     mega_condition{n_mega} = filename(4:14);
-    
-    
-    
-    %% == 11) Prepare EEG file ==============================
+end
+
+for n_sub=5:6 %length(subjects)
+    %% == 13) Prepare EEG file ==============================
     mega_eeg = {};
     mega_bad_channels = {};
     mega_conditions = {};
@@ -528,13 +537,13 @@ for n_sub=5:6 %length(subjects)
     % Create the MEGA CONDITION structure
     mega_condition{n_mega} = filename(4:14);
     
-    % Do a quick round of interpolation
+    %% == 14) Spherical interpolation ====================================
     for n_trial = 1:length(mega_eeg)
         mega_eeg{n_trial} = pop_interp(mega_eeg{n_trial}, chan_labels, 'spherical');
     end
     
-    % Create fieldtrip preprocessing data structure from scratch
-    % 1. Flag channels that were rejected in all trials
+    %% == 15) EEG to Fieldtrip structure (min duration and full trials) ==
+    % get channels that were rejected in all trials
     bad_electrodes = {};
     bad_electrodes = mega_bad_channels{1};
     for n_elec = 1:(length(mega_bad_channels))
@@ -542,8 +551,7 @@ for n_sub=5:6 %length(subjects)
     end
     bad_electrodes = unique(bad_electrodes);
     
-    
-    % 2. Get smallest value duration from mega_eeg
+    % get smallest value duration from mega_eeg
     min_duration = length(mega_eeg{n_trial}.times);
     for n_trial = 1:(length(mega_eeg))
         if min_duration > length(mega_eeg{n_trial}.times)
@@ -552,9 +560,9 @@ for n_sub=5:6 %length(subjects)
         end
     end
     
-    %% Create the fieldtrip data structure - shortened version for cov
+    % create the fieldtrip data structure - min_duration version
+    % this is the one we use to create the cov matrix!
     data = [];
-    
     label = {};
     for n_elec = 1:numel(chan_labels)
         label{n_elec} = chan_labels(n_elec).labels;
@@ -572,9 +580,10 @@ for n_sub=5:6 %length(subjects)
     for n_trial = 1:numel(mega_eeg)
         time{n_trial} = mega_eeg{min_duration_arg}.times;
     end
+    
     data.time = time;
     
-    % Take out channels that were bad in all trials
+    % take out channels that were bad in all trials
     bad_elec_struct = {'all'};
     for n_elec = 1:length(bad_electrodes)
         bad_elec_struct = [bad_elec_struct, ['-' bad_electrodes{n_elec}]];
@@ -583,9 +592,8 @@ for n_sub=5:6 %length(subjects)
     cfg.channel = bad_elec_struct;
     data = ft_preprocessing(cfg, data);
     
-    %% Create the fieldtrip data structure - all the trials
+    % create the fieldtrip data structure - full trials
     data_full = [];
-    
     label = {};
     for n_elec = 1:numel(chan_labels)
         label{n_elec} = chan_labels(n_elec).labels;
@@ -599,6 +607,7 @@ for n_sub=5:6 %length(subjects)
         trial{n_trial} = mega_eeg{n_trial}.data(:, :);
     end
     data_full.trial =  trial;
+    
     time = {};
     for n_trial = 1:numel(mega_eeg)
         time{n_trial} = mega_eeg{n_trial}.times;
@@ -615,10 +624,13 @@ for n_sub=5:6 %length(subjects)
     cfg.channel = bad_elec_struct;
     data_full = ft_preprocessing(cfg, data_full);
     
+    % take out extra and bad electrodes from the electrode structure
     elec_to_prune = [bad_elec_struct, {'all', '-LPA', '-NZ', '-RPA', '-Ground', '-A-63', '-A-64'}];
+    elec_aligned = load(['output/elec_aligned/' pairs{n_sub} '/' subjects{n_sub} '_elec_aligned.mat']);
+    elec_aligned = elec_aligned.elec_aligned;
     elec_aligned_pruned = ft_channelselection(elec_to_prune, elec_aligned);
     
-    %% == 10) Prepare leadfield model ==============================
+    %% == 16) Prepare leadfield model ==============================
     cfg = [];
     cfg.channel = elec_aligned_pruned;
     cfg.headmodel = headmodel;
@@ -639,10 +651,14 @@ for n_sub=5:6 %length(subjects)
     ft_plot_sens(sens,'style', 'r*');
     close all
     
-    %% == 11) Compute Cortical Patches ==============================
-    % Get the AAL atlas and do a corase partition into 19 regions
+    %% == 17) Compute Cortical Patches' Basis Functions (forward model) ==
+    % This cortical patch implementation (Limpiti et al., 2006) is based on code
+    % done by Dr Phil Chrapka. You can find the original code here:
+    % https://github.com/pchrapka/fieldtrip-beamforming
+    
+    % Get the AAL atlas and do a coarse partition into 19 regions
     atlas_file = 'dependencies/fieldtrip-21092018/template/atlas/aal/ROI_MNI_V4.nii';
-    patches = load('dependencies/aal-coarse-19.mat');
+    patches = load('dependencies/aal-coarse-19.mat'); % to get this file, simply run dependencies/aal-coarse-19.m
     patches = patches.patches;
     
     atlas = ft_read_atlas(atlas_file);
@@ -653,8 +669,6 @@ for n_sub=5:6 %length(subjects)
     patches_matrix.leadfield = {};
     patches_matrix.inside = {};
     patches_matrix.centroid = {};
-    
-    % Get the basis for each of the patches
     
     for n_patch = 1:length(patches)
         % Select points in anatomical regions that make up the patch
@@ -679,13 +693,13 @@ for n_sub=5:6 %length(subjects)
         % get leadfields in patch
         lf_patch = leadfield.leadfield(inside);
         
-        % concatenate intoa single wide matrix
+        % because we do not have
+        % individual MRI scans, we cannot constrain the moment orientations
+        % so we have to concatenate Hk intoa single wide matrix
         % n_channels x (3 * points in the patch)
         Hk = [lf_patch{:}];
         
-        
         % generate basis for patch
-        
         % assume Gamma = I, i.e. white noise
         % otherwise
         %   L = chol(Gamma);
@@ -696,6 +710,7 @@ for n_sub=5:6 %length(subjects)
         [U,Sk,~] = svd(Hk);
         nsingular = size(Sk,1);
         Uk = [];
+        
         % select the minimum number of singular values
         for j=1:nsingular
             % NOTE if Gamma ~= I
@@ -731,14 +746,12 @@ for n_sub=5:6 %length(subjects)
         patches_matrix(n_patch).centroid = centroid;
     end
     
-    %% We have a forward model. Now compute the spatial filters
+    %% == 18) LCMV criterion spatial filters for each patch ==============
     % Get the covariance matrix
     cov_avg = zeros(length(data.label), length(data.label), length(data.trial));
-    
     for n_trial = 1:length(data.trial)
         cov_avg(:, :, n_trial) = data.trial{n_trial} * data.trial{n_trial}';
     end
-    
     cov_avg = mean(cov_avg, 3);
     
     % allocate mem
@@ -748,19 +761,15 @@ for n_sub=5:6 %length(subjects)
     source.patch_centroid = zeros(length(leadfield.inside),3);
     source.inside = false(size(leadfield.inside));
     
-    
     % computer filter for each patch
     for n_patch=1:length(patches_matrix)
         fprintf('Computing filter for patch: %s\n',patches_matrix(n_patch).label);
         
+        Uk = patches_matrix(n_patch).basis; % patch basis
         
-        % get the patch basis
-        Uk = patches_matrix(n_patch).basis;
-        
+        % Moment orientation is unkown, so we maximize the power output by
+        % taking the smallest eigenvalue of Yk
         Yk = Uk'*pinv(cov_avg)*Uk;
-        
-        
-        % Moment orientation is unkown, so we maximize the power
         
         % ordered from smallest to largest
         [V,D] = eig(Yk);
@@ -784,14 +793,10 @@ for n_sub=5:6 %length(subjects)
         nverts = sum(patches_matrix(n_patch).inside);
         source.patch_centroid(patches_matrix(n_patch).inside,:) = ...
             repmat(patches_matrix(n_patch).centroid,nverts,1);
-        
-        
-        
         source.inside = leadfield.inside;
-        
     end
     
-    % Now that you have the patches, we get the data
+    %% == 19) Get patches time series ====================================
     % save filters
     leadfield.filter = source.filters;
     leadfield.filter_label = source.patch_labels;
@@ -821,7 +826,10 @@ for n_sub=5:6 %length(subjects)
     save(['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_sources.mat'], 'source_data');
 end
 
-%% We first plot the power average on the mri template from each of the cortical patches
+%% == 20) Plot average power of each patch on MRI scan ===================
+cfgin = [];
+resliced = ft_volumereslice(cfgin, mri);
+
 for n_patch = 1:length(leadfield.filter)
     filt_seed = leadfield.filter{n_patch};
     
@@ -839,41 +847,33 @@ for n_patch = 1:length(leadfield.filter)
         end
     end
     
-    cfgin = [];
-    resliced = ft_volumereslice(cfgin, mri);
+    
     cfgin = [];
     cfgin.parameter = 'pow';
     interp = ft_sourceinterpolate(cfgin, source, resliced);
+    
     % source plot
     cfgplot = [];
     cfgplot.method = 'slice';
     cfgplot.funparameter = 'pow';
-    cfgplot.maskparameter = cfgplot.funparameter;
-    cfgplot.funcolorlim   = [0.4 0.8];
-    cfgplot.opacitylim    = [0.4 0.8];
-    cfgplot.opacitymap    = 'rampup';
-    cfgplot.title = leadfield.filter_label{n_patch};
+    cfgplot.maskparameter = 'mask';
+    interp.mask = interp.pow > max(interp.pow(:))*0.65;
     ft_sourceplot(cfgplot, interp);
+    saveas(gcf,['figs/avg_pow_' patches_matrix(n_patch).label '.png']);
+    close all
 end
 
-
-%% Patch resolution on anatomical image
+%% == 21) Plot patch resolution on anatomical image ======================
 % You can also plot the patch resolution on an anatomical image
-% equation 14 of Limpiti2006
-%function plot_patch_resolution(obj,seed,varargin)
-%PLOT_PATCH_RESOLUTION plots patch resolution on anatomical image
-%   PLOT_PATCH_RESOLUTION(obj, seed, ...) plots patch
-%   resolution on anatomical images. The resolution is computed
-%   wrt a seed location and is represented by eq (14) of
-%   Limpiti2006
-%
+% (Eq14 of Limpiti et al., 2006). This resolution is computed
+% wrt a seed location 
 
 % reslice
 cfgin = [];
 resliced = ft_volumereslice(cfgin, mri);
 
-% create source struct
 for n_patch = 1:length(patches_matrix)
+    % create source struct
     source = [];
     source.dim = leadfield.dim;
     source.pos = leadfield.pos;
@@ -899,6 +899,6 @@ for n_patch = 1:length(patches_matrix)
     cfgplot.funparameter = 'pow';
     
     ft_sourceplot(cfgplot, interp);
-    saveas(gcf,['figs/' patches_matrix(n_patch).label '.png']);
+    saveas(gcf,['figs/patch_res_' patches_matrix(n_patch).label '.png']);
     close all
 end
