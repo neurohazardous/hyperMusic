@@ -10,7 +10,7 @@ WITHOUT ANY WARRANTY; without even the
 implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 See the GNU General Public License for
 more details. You should have received a copy of the GNU General Public
-License along with megFingerprinting.
+License along with hyperMusic.
 If not, see <https://www.gnu.org/licenses/>.
 %}
 
@@ -45,11 +45,11 @@ Makoto's preprocessing pipeline
 7. Trim data from third event to end of data 
 8. Take out line noise using spectral regression
 9. Run clean_rawdata
-10. Common Average Reference
-11. Output EEG lab file and save it
-12. Process baseline using same steps
-13. Prepare the EEG file
-14. Spherical interpolation
+10. Spherical interpolation
+11. Common Average Reference
+12. Output EEG lab file and save it
+13. Process baseline using same steps
+14. Prepare the EEG file
 15. EEG to Fieldtrip structure 
 16. Prepare the leadfield model 
 17. Compute cortical patches basis functions (forward model)
@@ -76,9 +76,16 @@ fileID = fopen('data/pair_codes.csv');
 participant_info = textscan(fileID,'%s %s', 'Delimiter', ','); % code, pair
 subjects = participant_info{1};
 pairs = participant_info{2};
+subjects = 
 fclose(fileID);
 load('dependencies/64ch_withoutA1A2.mat');
 ch_names = squeeze(Mon.electrodename);
+
+% Due to an issue with recording, we are not analyzing P06
+subjects(11) = [];
+subjects(11) = [];
+pairs(11) = []
+pairs(11) = []
 
 % Get the duration and time csv files
 fileID = fopen('dependencies/play_start_duration.csv');
@@ -238,8 +245,7 @@ for j=1:size(fid_pos,1)
 end
 
 %% == 3) Electrode allignment with template =============================
-for n_sub=5:6 %length(subjects)
-    
+for n_sub=5:length(subjects)
     % Properties
     chan_locs = ['data/raw/' pairs{n_sub} '/eeg/hM_EEGDIGI_' subjects{n_sub} '.sfp'];
     elec = ft_read_sens(chan_locs, 'senstype', 'eeg');
@@ -301,8 +307,7 @@ for n_sub=5:6 %length(subjects)
 end
 
 %% == 4) Load data and setup parameters ==================================
-
-for n_sub=5:6 %length(subjects)
+for n_sub=5:length(subjects)
     mega_eeg = {};
     mega_bad_channels = {};
     mega_conditions = {};
@@ -316,12 +321,21 @@ for n_sub=5:6 %length(subjects)
             names = {names.name};
             
             for n_filename = 1:length(names)
-                if names{n_filename}(16) == num2str(n_trial)
-                    filename = names{n_filename};
-                    break
+                if str2num(subjects{n_sub}(1:end-1)) > 9
+                    if names{n_filename}(17) == num2str(n_trial)
+                        filename = names{n_filename};
+                        break
+                    end
+                else
+                    if names{n_filename}(16) == num2str(n_trial)
+                        filename = names{n_filename};
+                        break
+                        
+                    end
                 end
             end
-            
+        
+            fprintf([filename '\n'])
             chan_locs = [filepath 'hM_EEGDIGI_' subjects{n_sub} '.sfp'];
             
             % Load file
@@ -374,10 +388,14 @@ for n_sub=5:6 %length(subjects)
             % Get info regarding rejected channels
             bad_channels = cell(size(chan_labels));
             n_channels = size(chan_labels)
-            for x = 1:n_channels(2)
-                if ~EEG.etc.clean_channel_mask(x)
-                    bad_channels{x} = chan_labels(x).labels;
+            if isfield(EEG.etc,'clean_channel_mask')
+                for x = 1:n_channels(2)
+                    if ~EEG.etc.clean_channel_mask(x)
+                        bad_channels{x} = chan_labels(x).labels;
+                    end
                 end
+            else
+                bad_channels = {};
             end
             bad_channels = bad_channels(~cellfun('isempty',bad_channels));
             
@@ -392,19 +410,26 @@ for n_sub=5:6 %length(subjects)
                 end
             end
             fclose(fid);
+               
+           %% == 10) Spherical interpolation =============================
+           EEG = pop_interp(EEG, chan_labels, 'spherical');
             
-            %% == 10) Common Average References ==========================
+            %% == 11) Common Average References ==========================
             EEG = fullRankAveRef(EEG);
             
-            %% == 11) Output EEG lab file and save it ====================
+            %% == 12) Output EEG lab file and save it ====================
+            if str2num(subjects{n_sub}(1:end-1)) > 9
+                EEGout = pop_saveset(EEG, 'filename',[filename(1:17) '.set'],'filepath', [output pairs{n_sub} '/']);
+            else
             EEGout = pop_saveset(EEG, 'filename',[filename(1:16) '.set'],'filepath', [output pairs{n_sub} '/']);
+            end  
             mega_bad_channels{n_mega} = bad_channels;
             mega_eeg{n_mega} = EEG;
             mega_condition{n_mega} = filename(4:16);
             n_mega = n_mega + 1;
         end
     end
-    %% == 12) Process baseline using the same steps =======================
+    %% == 13) Process baseline using the same steps =======================
     names = dir([filepath 'hM_' subjects{n_sub} '_baseline*.hdf5']);
     names = {names.name};
     filename = names{1};
@@ -414,18 +439,18 @@ for n_sub=5:6 %length(subjects)
     for x = 1:(length(EEG.event)-1)
         EEG = pop_editeventvals(EEG,'delete',1);
     end
-    
-    % == High pass filter @ 0.5 Hz ==================================
+    fprintf([filename '\n'])
+    % == High pass filter @ 0.5 Hz =======================================
     % default filtering strategy using Hamming window
     EEG = pop_eegfiltnew(EEG, 0.5, []);
     
-    % == Load channel location file ==============================
+    % == Load channel location file ======================================
     EEG=pop_chanedit(EEG, 'load',{chan_locs 'filetype' 'sfp'}, ...
         'changefield',{4 'datachan' 0});
     EEG = pop_select( EEG,'nochannel',{'A-63' 'A-64'});
     chan_labels = EEG.chanlocs;
     
-    % == Take out line noise using spectral regression ===========
+    % == Take out line noise using spectral regression ===================
     % I use step size == window size (Makoto suggestion)
     EEG = pop_cleanline(EEG, 'Bandwidth',2,'ChanCompIndices',[1:62], ...
         'ComputeSpectralPower', true, 'LineFrequencies',[60 120], ...
@@ -435,20 +460,24 @@ for n_sub=5:6 %length(subjects)
         'SlidingWinLength', 4,'SlidingWinStep', 4);
     close all;
     
-    % == Run Artifact Subspace Reconstruction ========================
+    % == Run Artifact Subspace Reconstruction ============================
     % Run ASR, use 8 SD because data is very artifactual
     % -> high-pass filtering disabled (we are already doing that)
     % -> noise based rejection disabled
     % -> bad window disabled because we cannot afford to loose data
     EEG = clean_rawdata(EEG, 5, 'off', 0.75, 'off', 8, 'off');
-    
+            
     % Get info regarding rejected channels
     bad_channels = cell(size(chan_labels));
     n_channels = size(chan_labels)
-    for x = 1:n_channels(2)
-        if ~EEG.etc.clean_channel_mask(x)
-            bad_channels{x} = chan_labels(x).labels;
+    if isfield(EEG.etc,'clean_channel_mask')
+        for x = 1:n_channels(2)
+            if ~EEG.etc.clean_channel_mask(x)
+                bad_channels{x} = chan_labels(x).labels;
+            end
         end
+    else
+        bad_channels = {};
     end
     bad_channels = bad_channels(~cellfun('isempty',bad_channels));
     
@@ -464,17 +493,24 @@ for n_sub=5:6 %length(subjects)
     end
     fclose(fid);
     
-    % == Common Average References ===========================
+    % == Spherical interpolation =========================================
+    EEG = pop_interp(EEG, chan_labels, 'spherical');
+    
+    % == Common Average References =======================================
     EEG = fullRankAveRef(EEG);
     
-    % == Output EEG lab file and save it =====================
-    EEGout = pop_saveset(EEG, 'filename',[filename(1:14) '.set'],'filepath', [output pairs{n_sub} '/']);
+    % == Output EEG lab file and save it =================================
+    if str2num(subjects{n_sub}(1:end-1)) > 9
+    EEGout = pop_saveset(EEG, 'filename',[filename(1:15) '.set'],'filepath', [output pairs{n_sub} '/']);
+    else 
+        EEGout = pop_saveset(EEG, 'filename',[filename(1:14) '.set'],'filepath', [output pairs{n_sub} '/']);
+    end 
     mega_bad_channels{n_mega} = bad_channels;
     mega_eeg{n_mega} = EEG;
     mega_condition{n_mega} = filename(4:14);
-end
-
-for n_sub=5:6 %length(subjects)
+    end
+    
+for n_sub=5:length(subjects)
     %% == 13) Prepare EEG file ==============================
     mega_eeg = {};
     mega_bad_channels = {};
@@ -482,16 +518,26 @@ for n_sub=5:6 %length(subjects)
     n_mega = 1;
     for n_condition=1:length(conditions)
         for n_trial=1:5
+            
             % Create the MEGA EEG structure
             filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
             names = dir([filepath 'hM_' subjects{n_sub} '_' conditions{n_condition} '*.set']);
             names = {names.name};
             for n_filename = 1:length(names)
-                if names{n_filename}(16) == num2str(n_trial)
-                    filename = names{n_filename};
-                    break
+                if str2num(subjects{n_sub}(1:end-1)) > 9
+                    if names{n_filename}(17) == num2str(n_trial)
+                        filename = names{n_filename};
+                        break
+                    end
+                else
+                    if names{n_filename}(16) == num2str(n_trial)
+                        filename = names{n_filename};
+                        break
+                        
+                    end
                 end
             end
+            
             mega_eeg{n_mega} = pop_loadset('filename', filename, ...
                 'filepath', filepath, 'loadmode', 'all');
             
@@ -499,16 +545,25 @@ for n_sub=5:6 %length(subjects)
             load('dependencies/chan_labels', 'chan_labels');
             bad_channels = cell(size(chan_labels));
             n_channels = size(chan_labels);
-            for x = 1:n_channels(2)
-                if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
-                    bad_channels{x} = chan_labels(x).labels;
+            
+            if isfield(EEG.etc,'clean_channel_mask')
+                for x = 1:n_channels(2)
+                    if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
+                        bad_channels{x} = chan_labels(x).labels;
+                    end
                 end
+            else
+                bad_channels = {};
             end
             bad_channels = bad_channels(~cellfun('isempty',bad_channels));
             mega_bad_channels{n_mega} = bad_channels;
             
             % Create the MEGA CONDITION structure
-            mega_condition{n_mega} = filename(4:16);
+            if str2num(subjects{n_sub}(1:end-1)) > 9
+                mega_condition{n_mega} = filename(4:17);
+            else
+                mega_condition{n_mega} = filename(4:16);
+            end
             n_mega = n_mega + 1;
         end
     end
@@ -526,20 +581,23 @@ for n_sub=5:6 %length(subjects)
     load('dependencies/chan_labels', 'chan_labels');
     bad_channels = cell(size(chan_labels));
     n_channels = size(chan_labels);
-    for x = 1:n_channels(2)
-        if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
-            bad_channels{x} = chan_labels(x).labels;
+    if isfield(EEG.etc,'clean_channel_mask')
+        for x = 1:n_channels(2)
+            if ~mega_eeg{n_mega}.etc.clean_channel_mask(x)
+                bad_channels{x} = chan_labels(x).labels;
+            end
         end
+    else
+        bad_channels = {};
     end
     bad_channels = bad_channels(~cellfun('isempty',bad_channels));
     mega_bad_channels{n_mega} = bad_channels;
     
     % Create the MEGA CONDITION structure
-    mega_condition{n_mega} = filename(4:14);
-    
-    %% == 14) Spherical interpolation ====================================
-    for n_trial = 1:length(mega_eeg)
-        mega_eeg{n_trial} = pop_interp(mega_eeg{n_trial}, chan_labels, 'spherical');
+    if str2num(subjects{n_sub}(1:end-1)) > 9
+        mega_condition{n_mega} = filename(4:15);
+    else
+        mega_condition{n_mega} = filename(4:14);
     end
     
     %% == 15) EEG to Fieldtrip structure (min duration and full trials) ==
@@ -575,7 +633,7 @@ for n_sub=5:6 %length(subjects)
     for n_trial = 1:numel(mega_eeg)
         trial{n_trial} = mega_eeg{n_trial}.data(:, 1:min_duration);
     end
-    data.trial =  trial;
+    data.trial = trial;
     time = {};
     for n_trial = 1:numel(mega_eeg)
         time{n_trial} = mega_eeg{min_duration_arg}.times;
@@ -823,82 +881,138 @@ for n_sub=5:6 %length(subjects)
         source_data.sources{n_trial} = cortical_patches * data_full.trial{n_trial};
     end
     
-    save(['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_sources.mat'], 'source_data');
+    % This data gets sent to Graham 
+    trials_labels = source_data.trials_labels;
+    save(['2-STE_graham/' pairs{n_sub} '/' subjects{n_sub} '_trials_labels.mat'], 'trials_labels');
+    
+    source_labels = source_data.source_label;
+    save(['2-STE_graham/' pairs{n_sub} '/' subjects{n_sub} '_source_labels.mat'], 'source_labels');
+    
+    sources = source_data.sources;
+    save(['2-STE_graham/' pairs{n_sub} '/' subjects{n_sub} '_sources.mat'], 'sources');
+    
+    
+    % Save the grand file just in case, too
+    bad_electrodes = source_data.bad_electrodes;
+    save(['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_bad_electrodes.mat'], 'bad_electrodes');
+    save(['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_grand_sources.mat'], 'source_data');
+    
+    %% == 20) Plot average power of each patch on MRI scan ===============
+    cfgin = [];
+    resliced = ft_volumereslice(cfgin, mri);
+    
+    for n_patch = 1:length(leadfield.filter)
+        filt_seed = leadfield.filter{n_patch};
+        
+        % create source struct
+        source = [];
+        source.dim = leadfield.dim;
+        source.pos = leadfield.pos;
+        source.inside = leadfield.inside;
+        source.method = 'average';
+        source.avg.pow = zeros(size(leadfield.inside));
+        
+        for i=1:length(leadfield.inside)
+            if leadfield.inside(i)
+                source.avg.pow(i) = norm(filt_seed*leadfield.leadfield{i},'fro');
+            end
+        end
+        
+        
+        cfgin = [];
+        cfgin.parameter = 'pow';
+        interp = ft_sourceinterpolate(cfgin, source, resliced);
+        
+        % source plot
+        cfgplot = [];
+        cfgplot.method = 'slice';
+        cfgplot.funparameter = 'pow';
+        cfgplot.maskparameter = 'mask';
+        interp.mask = interp.pow > max(interp.pow(:))*0.65;
+        ft_sourceplot(cfgplot, interp);
+        saveas(gcf,['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_avg_pow_' patches_matrix(n_patch).label '.png']);
+        close all
+    end
+    
+    %% == 21) Plot patch resolution on anatomical image ==================
+    % You can also plot the patch resolution on an anatomical image
+    % (Eq14 of Limpiti et al., 2006). This resolution is computed
+    % wrt a seed location
+    
+    % reslice
+    cfgin = [];
+    resliced = ft_volumereslice(cfgin, mri);
+    
+    for n_patch = 1:length(patches_matrix)
+        % create source struct
+        source = [];
+        source.dim = leadfield.dim;
+        source.pos = leadfield.pos;
+        source.inside = leadfield.inside;
+        source.method = 'average';
+        source.avg.pow = zeros(size(leadfield.inside));
+        
+        H = patches_matrix(n_patch).leadfield;
+        U_seed = patches_matrix(n_patch).basis;
+        delta = trace(H'*(U_seed*U_seed')*H)/trace(H'*H);
+        source.avg.pow(patches_matrix(n_patch).inside) = delta;
+        
+        % interpolate
+        cfgin = [];
+        cfgin.parameter = 'pow';
+        interp = ft_sourceinterpolate(cfgin, source, resliced);
+        
+        % source plot
+        cfgplot = [];
+        cfgplot.maskparameter = 'mask';
+        interp.mask = interp.pow > max(interp.pow(:))*0.5;
+        cfgplot.method = 'slice';
+        cfgplot.funparameter = 'pow';
+        
+        ft_sourceplot(cfgplot, interp);
+        saveas(gcf,['output/eeg_sources/' pairs{n_sub} '/' subjects{n_sub} '_patch_res_' patches_matrix(n_patch).label '.png']);
+        close all
+    end
 end
 
-%% == 20) Plot average power of each patch on MRI scan ===================
-cfgin = [];
-resliced = ft_volumereslice(cfgin, mri);
-
-for n_patch = 1:length(leadfield.filter)
-    filt_seed = leadfield.filter{n_patch};
-    
-    % create source struct
-    source = [];
-    source.dim = leadfield.dim;
-    source.pos = leadfield.pos;
-    source.inside = leadfield.inside;
-    source.method = 'average';
-    source.avg.pow = zeros(size(leadfield.inside));
-    
-    for i=1:length(leadfield.inside)
-        if leadfield.inside(i)
-            source.avg.pow(i) = norm(filt_seed*leadfield.leadfield{i},'fro');
+%% == Sanity check: Check the time series ================================
+for n_sub=5:length(subjects)
+    for n_condition=1:length(conditions)
+        for n_trial=1:5
+            % Read file
+            filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
+            names = dir([filepath 'hM_' subjects{n_sub} '_' conditions{n_condition} '*.set']);
+            names = {names.name};
+            for n_filename = 1:length(names)
+                if str2num(subjects{n_sub}(1:end-1)) > 9
+                    if names{n_filename}(17) == num2str(n_trial)
+                        filename = names{n_filename};
+                        break
+                    end
+                else
+                    if names{n_filename}(16) == num2str(n_trial)
+                        filename = names{n_filename};
+                        break
+                        
+                    end
+                end
+            end
+            EEG = pop_loadset('filename', filename, ...
+                'filepath', filepath, 'loadmode', 'all');
+            fprintf([filename '\n\n\n\n'])
+            pop_eegplot(EEG)
         end
     end
     
+    % Baseline
+    filepath = ['output/eeg_eeglab_fieldtrip/' pairs{n_sub} '/'];
+    names = dir([filepath 'hM_' subjects{n_sub} '_baseline*.set']);
+    names = {names.name};
+    filename = names{1};
     
-    cfgin = [];
-    cfgin.parameter = 'pow';
-    interp = ft_sourceinterpolate(cfgin, source, resliced);
+    EEG = pop_loadset('filename', filename, 'filepath', ...
+        filepath, 'loadmode', 'all');
+    fprintf([filename '\n\n\n\n'])
+    pop_eegplot(EEG)
     
-    % source plot
-    cfgplot = [];
-    cfgplot.method = 'slice';
-    cfgplot.funparameter = 'pow';
-    cfgplot.maskparameter = 'mask';
-    interp.mask = interp.pow > max(interp.pow(:))*0.65;
-    ft_sourceplot(cfgplot, interp);
-    saveas(gcf,['figs/avg_pow_' patches_matrix(n_patch).label '.png']);
-    close all
-end
-
-%% == 21) Plot patch resolution on anatomical image ======================
-% You can also plot the patch resolution on an anatomical image
-% (Eq14 of Limpiti et al., 2006). This resolution is computed
-% wrt a seed location 
-
-% reslice
-cfgin = [];
-resliced = ft_volumereslice(cfgin, mri);
-
-for n_patch = 1:length(patches_matrix)
-    % create source struct
-    source = [];
-    source.dim = leadfield.dim;
-    source.pos = leadfield.pos;
-    source.inside = leadfield.inside;
-    source.method = 'average';
-    source.avg.pow = zeros(size(leadfield.inside));
-    
-    H = patches_matrix(n_patch).leadfield;
-    U_seed = patches_matrix(n_patch).basis;
-    delta = trace(H'*(U_seed*U_seed')*H)/trace(H'*H);
-    source.avg.pow(patches_matrix(n_patch).inside) = delta;
-    
-    % interpolate
-    cfgin = [];
-    cfgin.parameter = 'pow';
-    interp = ft_sourceinterpolate(cfgin, source, resliced);
-    
-    % source plot
-    cfgplot = [];
-    cfgplot.maskparameter = 'mask';
-    interp.mask = interp.pow > max(interp.pow(:))*0.5;
-    cfgplot.method = 'slice';
-    cfgplot.funparameter = 'pow';
-    
-    ft_sourceplot(cfgplot, interp);
-    saveas(gcf,['figs/patch_res_' patches_matrix(n_patch).label '.png']);
-    close all
 end
